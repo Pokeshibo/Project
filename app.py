@@ -2,7 +2,7 @@
 from flask import Flask, render_template, request, redirect, url_for, session
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
-from flask_mail import Mail, Message
+from flask_mailman import Mail, Message
 from flask_socketio import SocketIO, emit, join_room
 import random
 import os
