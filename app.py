@@ -22,7 +22,7 @@ app.config['MAIL_DEFAULT_SENDER'] = 'Tital <noreply@tital.com>'
 
 db = SQLAlchemy(app)
 mail = Mail(app)
-socketio = SocketIO(app)
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 
@@ -181,11 +181,12 @@ def chat():
 # Socket.IO Handlers
 @socketio.on('connect')
 def handle_connect():
-    if current_user.is_authenticated:
-        current_user.online = True
-        db.session.commit()
-        emit('user_online', {'user_id': current_user.id}, broadcast=True)
-
+    if not current_user.is_authenticated:
+        raise ConnectionRefusedError('Unauthorized!')
+    join_room(str(current_user.id))
+    current_user.online = True
+    db.session.commit()
+    print(f"User {current_user.id} connected")
 @socketio.on('disconnect')
 def handle_disconnect():
     if current_user.is_authenticated:
@@ -213,12 +214,17 @@ def get_messages(receiver_id):
 @socketio.on('send_message')
 def handle_send_message(data):
     try:
-        # Validate receiver
+        print("Received message data:", data)
+        
+        # Validate input
+        if 'receiver_id' not in data or 'content' not in data:
+            raise ValueError("Invalid message format")
+            
         receiver = User.query.get(data['receiver_id'])
         if not receiver:
-            raise ValueError("Invalid receiver")
-        
-        # Create and save message
+            raise ValueError("Receiver not found")
+
+        # Create message
         new_message = Message(
             sender_id=current_user.id,
             receiver_id=receiver.id,
@@ -226,8 +232,9 @@ def handle_send_message(data):
         )
         db.session.add(new_message)
         db.session.commit()
-        
-        # Prepare response data
+        print("Message saved to DB:", new_message.id)
+
+        # Prepare response
         message_data = {
             'id': new_message.id,
             'sender_id': current_user.id,
@@ -236,20 +243,20 @@ def handle_send_message(data):
             'timestamp': new_message.timestamp.strftime('%H:%M'),
             'is_delivered': False
         }
-        
+
         # Emit to receiver
         emit('new_message', message_data, room=str(receiver.id))
-        
-        # Send delivery confirmation to sender
-        emit('message_sent', {
+        print("Emitted to receiver:", receiver.id)
+
+        # Confirm to sender
+        emit('message_confirmation', {
             'temp_id': data.get('temp_id'),
             'message_id': new_message.id
         }, room=str(current_user.id))
-        
-    except Exception as e:
-        print(f"Error sending message: {str(e)}")
-        emit('message_error', {'error': str(e)}, room=str(current_user.id))
 
+    except Exception as e:
+        print("Error in send_message:", str(e))
+        emit('message_error', {'error': str(e)}, room=str(current_user.id))
 # 4. Add Message Delivery Tracking
 @socketio.on('message_delivered')
 def handle_delivery_confirmation(data):
