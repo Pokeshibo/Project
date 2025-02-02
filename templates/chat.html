@@ -50,92 +50,83 @@
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
-    <script>
-        const socket = io();
-        let currentReceiver = null;
+    <!-- chat.html के JavaScript को अपडेट करें -->
+<script>
+    // Initialize Socket.IO connection
+    const socket = io();
+    let currentReceiver = null;
 
-        // Connect to user's personal room
-        socket.on('connect', () => {
-            socket.emit('join', { user_id: '{{ current_user.id }}' });
-        });
+    // Connect to user's personal room using string ID
+    socket.on('connect', () => {
+        socket.emit('join', { user_id: '{{ current_user.id|string }}' });
+    });
 
-        // Handle online/offline users
-        socket.on('user_online', (data) => {
-            const userItem = document.querySelector(`.user-item[data-user-id="${data.user_id}"]`);
-            if(userItem) {
-                userItem.querySelector('.bg-gray-300').classList.replace('bg-gray-300', 'bg-green-500');
-            }
-        });
-
-        socket.on('user_offline', (data) => {
-            const userItem = document.querySelector(`.user-item[data-user-id="${data.user_id}"]`);
-            if(userItem) {
-                userItem.querySelector('.bg-green-500').classList.replace('bg-green-500', 'bg-gray-300');
-            }
-        });
-
-        // Handle incoming messages
-        socket.on('receive_message', (data) => {
+    // Handle incoming messages
+    socket.on('receive_message', (data) => {
+        // Only show if in current chat
+        if(currentReceiver && currentReceiver == data.sender_id.toString()) {
             const messagesDiv = document.getElementById('messages');
-            const messageHtml = `
+            messagesDiv.innerHTML += `
                 <div class="bg-blue-100 p-3 rounded-lg max-w-md">
                     <p class="font-medium">${data.sender_name}</p>
                     <p>${data.content}</p>
                     <span class="text-xs text-gray-500">${data.timestamp}</span>
                 </div>
             `;
-            messagesDiv.innerHTML += messageHtml;
             messagesDiv.scrollTop = messagesDiv.scrollHeight;
-        });
-
-        // Select user to chat
-        document.querySelectorAll('.user-item').forEach(item => {
-            item.addEventListener('click', () => {
-                currentReceiver = item.dataset.userId;
-                document.querySelectorAll('.user-item').forEach(u => u.classList.remove('bg-blue-50'));
-                item.classList.add('bg-blue-50');
-                loadChatHistory(currentReceiver);
-            });
-        });
-
-        function loadChatHistory(receiverId) {
-            fetch(`/chat/history/${receiverId}`)
-                .then(response => response.json())
-                .then(messages => {
-                    const messagesDiv = document.getElementById('messages');
-                    messagesDiv.innerHTML = messages.map(msg => `
-                        <div class="${msg.sender_id == {{ current_user.id }} ? 'bg-green-100' : 'bg-blue-100'} p-3 rounded-lg max-w-md ml-auto">
-                            <p>${msg.content}</p>
-                            <span class="text-xs text-gray-500">${new Date(msg.timestamp).toLocaleTimeString()}</span>
-                        </div>
-                    `).join('');
-                    messagesDiv.scrollTop = messagesDiv.scrollHeight;
-                });
         }
+        else {
+            // Show notification for new message
+            showNotification(data.sender_name, data.content);
+        }
+    });
 
-        function sendMessage() {
-            const input = document.getElementById('message-input');
-            const message = input.value.trim();
+    function showNotification(sender, message) {
+        const notification = document.createElement('div');
+        notification.className = 'fixed bottom-4 right-4 bg-white p-4 rounded-lg shadow-lg border-l-4 border-blue-500';
+        notification.innerHTML = `
+            <p class="font-semibold">New message from ${sender}</p>
+            <p class="text-sm">${message.substring(0, 30)}${message.length > 30 ? '...' : ''}</p>
+        `;
+        document.body.appendChild(notification);
+        
+        setTimeout(() => notification.remove(), 5000);
+    }
+
+    // User selection handler
+    document.querySelectorAll('.user-item').forEach(item => {
+        item.addEventListener('click', () => {
+            currentReceiver = item.dataset.userId;
+            loadChatHistory(currentReceiver);
             
-            if(message && currentReceiver) {
-                socket.emit('send_message', {
-                    receiver_id: currentReceiver,
-                    content: message
-                });
-                
-                // Add message to local chat
-                const messagesDiv = document.getElementById('messages');
-                messagesDiv.innerHTML += `
-                    <div class="bg-green-100 p-3 rounded-lg max-w-md ml-auto">
-                        <p>${message}</p>
-                        <span class="text-xs text-gray-500">${new Date().toLocaleTimeString()}</span>
-                    </div>
-                `;
-                messagesDiv.scrollTop = messagesDiv.scrollHeight;
-                
-                input.value = '';
-            }
+            // Mark all messages as read
+            fetch(`/messages/read/${currentReceiver}`, { method: 'POST' });
+        });
+    });
+
+    // Modified sendMessage function
+    function sendMessage() {
+        const input = document.getElementById('message-input');
+        const message = input.value.trim();
+        
+        if(message && currentReceiver) {
+            socket.emit('send_message', {
+                receiver_id: currentReceiver,  // Send as string
+                content: message
+            });
+            
+            // Add message to local chat
+            const messagesDiv = document.getElementById('messages');
+            messagesDiv.innerHTML += `
+                <div class="bg-green-100 p-3 rounded-lg max-w-md ml-auto">
+                    <p>${message}</p>
+                    <span class="text-xs text-gray-500">${new Date().toLocaleTimeString()}</span>
+                </div>
+            `;
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            input.value = '';
         }
-    </script>
+    }
+</script>
 </body>
 </html>
