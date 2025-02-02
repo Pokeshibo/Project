@@ -51,123 +51,93 @@
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <!-- chat.html में नया JavaScript कोड -->
+<!-- chat.html में JavaScript अपडेट करें -->
 <script>
-    let currentMessages = [];
-    let currentReceiver = null;
-
-    // Initialize Socket.IO
-    const socket = io();
-    
-    // Connect to personal room
-    socket.on('connect', () => {
-        socket.emit('join', { user_id: '{{ current_user.id }}' });
+    const socket = io({
+        transports: ['websocket'],
+        reconnectionAttempts: 5
     });
 
-    // Load messages when receiver selected
-    async function loadChatHistory(receiverId) {
-        currentReceiver = receiverId;
-        try {
-            const response = await fetch(`/api/messages/${receiverId}`);
-            currentMessages = await response.json();
-            renderMessages();
-        } catch (error) {
-            console.error('Error loading messages:', error);
-        }
-    }
-
-    // Render messages from database
-    function renderMessages() {
-        const container = document.getElementById('messages');
-        container.innerHTML = '';
-        
-        currentMessages.forEach(msg => {
-            const div = document.createElement('div');
-            div.className = msg.is_mine ? 
-                'bg-green-100 ml-auto' : 'bg-blue-100';
-            div.innerHTML = `
-                <div class="p-3 rounded-lg max-w-md mb-2">
-                    <p>${msg.content}</p>
-                    <div class="flex items-center justify-between mt-1">
-                        <span class="text-xs text-gray-500">${msg.timestamp}</span>
-                        ${msg.is_mine ? 
-                            `<span class="text-xs ${msg.is_delivered ? 'text-blue-500' : 'text-gray-400'}">
-                                ${msg.is_delivered ? '✓✓' : '✓'}
-                            </span>` : ''
-                        }
-                    </div>
-                </div>
-            `;
-            container.appendChild(div);
-        });
-        container.scrollTop = container.scrollHeight;
-    }
-
-    // Handle new messages
-    socket.on('new_message', (msg) => {
-        if(msg.sender_id == currentReceiver) {
-            currentMessages.push({
-                ...msg,
-                is_mine: false
-            });
-            renderMessages();
-            // Send delivery confirmation
-            socket.emit('message_delivered', { 
-                message_id: msg.id 
-            });
-        }
+    // Connection status handling
+    socket.on('connect_error', (error) => {
+        console.error('Connection Error:', error);
+        alert('Connection failed: ' + error.message);
     });
 
-    // Send message with temporary ID
+    // Improved message sending
     async function sendMessage() {
         const input = document.getElementById('message-input');
         const content = input.value.trim();
-        if(!content || !currentReceiver) return;
+        if (!content || !currentReceiver) return;
 
         const tempId = Date.now();
-        const tempMsg = {
-            temp_id: tempId,
-            content: content,
-            is_mine: true,
-            timestamp: new Date().toLocaleTimeString(),
-            is_delivered: false
-        };
-
-        // Add temporary message
-        currentMessages.push(tempMsg);
-        renderMessages();
+        addTempMessage(tempId, content);
         input.value = '';
 
         try {
-            await socket.emitWithAck('send_message', {
+            const response = await socket.emitWithAck('send_message', {
                 receiver_id: currentReceiver,
                 content: content,
                 temp_id: tempId
             });
+            
+            if(response.status === 'success') {
+                updateMessageStatus(tempId, response.message_id);
+            }
         } catch (error) {
-            alert('Message failed to send: ' + error);
-            // Remove temporary message on error
-            currentMessages = currentMessages.filter(m => m.temp_id !== tempId);
+            showErrorMessage(tempId, error);
+        }
+    }
+
+    function addTempMessage(tempId, content) {
+        const message = {
+            temp_id: tempId,
+            content: content,
+            is_mine: true,
+            timestamp: new Date().toLocaleTimeString(),
+            status: 'sending'
+        };
+        currentMessages.push(message);
+        renderMessages();
+    }
+
+    function updateMessageStatus(tempId, messageId) {
+        const index = currentMessages.findIndex(m => m.temp_id === tempId);
+        if(index > -1) {
+            currentMessages[index].id = messageId;
+            currentMessages[index].status = 'sent';
             renderMessages();
         }
     }
 
-    // Handle message sent confirmation
-    socket.on('message_sent', (data) => {
-        const index = currentMessages.findIndex(m => m.temp_id === data.temp_id);
+    function showErrorMessage(tempId, error) {
+        const index = currentMessages.findIndex(m => m.temp_id === tempId);
         if(index > -1) {
-            currentMessages[index].id = data.message_id;
+            currentMessages[index].status = 'failed';
+            currentMessages[index].error = error;
             renderMessages();
         }
-    });
+        alert('Message failed: ' + error);
+    }
 
-    // Handle delivery confirmation
-    socket.on('delivery_confirmation', (data) => {
-        const msg = currentMessages.find(m => m.id === data.message_id);
-        if(msg) {
-            msg.is_delivered = true;
-            renderMessages();
-        }
-    });
+    // Enhanced message rendering
+    function renderMessages() {
+        const container = document.getElementById('messages');
+        container.innerHTML = currentMessages.map(msg => `
+            <div class="message ${msg.is_mine ? 'mine' : 'theirs'} ${msg.status}">
+                <div class="content">${msg.content}</div>
+                <div class="status">
+                    ${msg.status === 'sending' ? '🕒' : ''}
+                    ${msg.status === 'sent' ? '✓' : ''}
+                    ${msg.status === 'delivered' ? '✓✓' : ''}
+                    ${msg.status === 'failed' ? '❌' : ''}
+                </div>
+                <div class="time">${msg.timestamp}</div>
+                ${msg.error ? `<div class="error">${msg.error}</div>` : ''}
+            </div>
+        `).join('');
+        container.scrollTop = container.scrollHeight;
+    }
 </script>
 </body>
 </html>
