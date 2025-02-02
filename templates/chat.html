@@ -1,0 +1,80 @@
+<!-- templates/chat.html -->
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Tital - Chat</title>
+    <link href="https://unpkg.com/tailwindcss@^2/dist/tailwind.min.css" rel="stylesheet>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+</head>
+<body class="bg-gray-100 h-screen">
+    <div class="flex h-full">
+        <!-- Online Users Sidebar -->
+        <div class="w-1/4 bg-white shadow-lg p-4">
+            <h2 class="text-2xl font-bold text-purple-600 mb-4">Online Users</h2>
+            <div id="online-users" class="space-y-2">
+                {% for user in online_users %}
+                <div class="flex items-center p-2 hover:bg-gray-100 rounded-lg">
+                    <div class="w-3 h-3 bg-green-500 rounded-full mr-2"></div>
+                    <span>{{ user.username }}</span>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        
+        <!-- Chat Main Area -->
+        <div class="flex-1 flex flex-col">
+            <!-- Chat Header -->
+            <div class="bg-white shadow-lg p-4">
+                <h1 class="text-2xl font-bold text-purple-600">Tital Chat</h1>
+            </div>
+            
+            <!-- Chat Messages -->
+            <div id="messages" class="flex-1 overflow-y-auto p-4 space-y-4">
+                <!-- Messages will be loaded here -->
+            </div>
+            
+            <!-- Message Input -->
+            <div class="bg-white p-4 shadow-lg">
+                <input type="text" id="message-input" 
+                    class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-purple-500"
+                    placeholder="Type your message...">
+                <button onclick="sendMessage()" 
+                    class="mt-2 bg-purple-600 text-white px-6 py-2 rounded-lg hover:bg-purple-700 transition duration-300">
+                    Send
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        
+        socket.on('connect', () => {
+            console.log('Connected to WebSocket');
+        });
+
+        socket.on('new_message', (data) => {
+            const messageElement = document.createElement('div');
+            messageElement.innerHTML = `
+                <div class="bg-purple-100 p-3 rounded-lg max-w-md">
+                    <p>${data.content}</p>
+                    <span class="text-xs text-gray-500">${data.timestamp}</span>
+                </div>
+            `;
+            document.getElementById('messages').appendChild(messageElement);
+        });
+        
+        function sendMessage() {
+            const input = document.getElementById('message-input');
+            const message = input.value;
+            if(message.trim()) {
+                socket.emit('message', {
+                    receiver_id: 1, // Replace with actual receiver ID
+                    content: message
+                });
+                input.value = '';
+            }
+        }
+    </script>
+</body>
+</html>
