@@ -226,6 +226,13 @@ def handle_send_message(data):
         'sender_name': current_user.username,
         'message_id': new_message.id
     }, room=str(data['receiver_id']))  # Convert to string for room name
+# Socket.IO handler
+@socketio.on('typing')
+def handle_typing(data):
+    emit('typing', {
+         'sender_id': current_user.id,
+         'sender_name': current_user.username
+       }, room=str(data['receiver_id']))
 @socketio.on('join')
 def handle_join(data):
     join_room(data['user_id'])
