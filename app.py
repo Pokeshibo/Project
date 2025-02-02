@@ -47,10 +47,11 @@ class OTP(db.Model):
 class Message(db.Model):
     __tablename__ = 'messages'
     id = db.Column(db.Integer, primary_key=True)
-    sender_id = db.Column(db.Integer)
-    receiver_id = db.Column(db.Integer)
-    content = db.Column(db.Text)
-    timestamp = db.Column(db.DateTime)
+    sender_id = db.Column(db.Integer, db.ForeignKey('users.id'))
+    receiver_id = db.Column(db.Integer, db.ForeignKey('users.id'))
+    content = db.Column(db.Text, nullable=False)
+    timestamp = db.Column(db.DateTime, default=datetime.now)
+    is_delivered = db.Column(db.Boolean, default=False)
 
 # Initialize database within app context
 with app.app_context():
@@ -192,32 +193,71 @@ def handle_disconnect():
         current_user.last_seen = datetime.now()
         db.session.commit()
         emit('user_offline', {'user_id': current_user.id}, broadcast=True)
+@app.route('/api/messages/<int:receiver_id>')
+@login_required
+def get_messages(receiver_id):
+    messages = Message.query.filter(
+        ((Message.sender_id == current_user.id) & (Message.receiver_id == receiver_id)) |
+        ((Message.sender_id == receiver_id) & (Message.receiver_id == current_user.id))
+    ).order_by(Message.timestamp.asc()).all()
+    
+    return jsonify([{
+        'id': msg.id,
+        'sender_id': msg.sender_id,
+        'content': msg.content,
+        'timestamp': msg.timestamp.strftime('%Y-%m-%d %H:%M'),
+        'is_mine': msg.sender_id == current_user.id
+    } for msg in messages])
+
+# 3. Updated Socket.IO Handlers
 @socketio.on('send_message')
 def handle_send_message(data):
-    # Validate receiver exists
-    receiver = User.query.get(data['receiver_id'])
-    if not receiver:
-        return
-    
-    # Save message to database
-    new_message = Message(
-        sender_id=current_user.id,
-        receiver_id=data['receiver_id'],
-        content=data['content'],
-        timestamp=datetime.now()
-    )
-    db.session.add(new_message)
-    db.session.commit()
-    
-    # Emit to receiver's personal room
-    emit('receive_message', {
-        'sender_id': current_user.id,
-        'content': data['content'],
-        'timestamp': datetime.now().strftime('%H:%M'),
-        'sender_name': current_user.username,
-        'message_id': new_message.id
-    }, room=str(data['receiver_id']))  # Convert to string for room name
-# Socket.IO handler
+    try:
+        # Validate receiver
+        receiver = User.query.get(data['receiver_id'])
+        if not receiver:
+            raise ValueError("Invalid receiver")
+        
+        # Create and save message
+        new_message = Message(
+            sender_id=current_user.id,
+            receiver_id=receiver.id,
+            content=data['content']
+        )
+        db.session.add(new_message)
+        db.session.commit()
+        
+        # Prepare response data
+        message_data = {
+            'id': new_message.id,
+            'sender_id': current_user.id,
+            'sender_name': current_user.username,
+            'content': new_message.content,
+            'timestamp': new_message.timestamp.strftime('%H:%M'),
+            'is_delivered': False
+        }
+        
+        # Emit to receiver
+        emit('new_message', message_data, room=str(receiver.id))
+        
+        # Send delivery confirmation to sender
+        emit('message_sent', {
+            'temp_id': data.get('temp_id'),
+            'message_id': new_message.id
+        }, room=str(current_user.id))
+        
+    except Exception as e:
+        print(f"Error sending message: {str(e)}")
+        emit('message_error', {'error': str(e)}, room=str(current_user.id))
+
+# 4. Add Message Delivery Tracking
+@socketio.on('message_delivered')
+def handle_delivery_confirmation(data):
+    message = Message.query.get(data['message_id'])
+    if message and message.receiver_id == current_user.id:
+        message.is_delivered = True
+        db.session.commit()
+        emit('delivery_confirmation', {'message_id': message.id}, room=str(message.sender_id))
 @socketio.on('join')
 def handle_join(data):
     join_room(data['user_id'])
