@@ -5,7 +5,6 @@ from flask_login import LoginManager, UserMixin, login_user, login_required, log
 from flask_mailman import Mail, EmailMessage
 from flask_socketio import SocketIO, emit, join_room
 import random
-import os
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, timedelta
 
@@ -17,8 +16,8 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///tital.db'
 app.config['MAIL_SERVER'] = 'smtp.gmail.com'
 app.config['MAIL_PORT'] = 587
 app.config['MAIL_USE_TLS'] = True
-app.config['MAIL_USERNAME'] = 'rupyargaming60@gmail.com'  # ← यहाँ अपना Gmail डालें
-app.config['MAIL_PASSWORD'] = 'engd xffg syvt alhs'     # ← यहाँ App Password डालें
+app.config['MAIL_USERNAME'] = 'rupyargaming60@gmail.com'  # ← अपना Gmail डालें
+app.config['MAIL_PASSWORD'] = 'engd xffg syvt alhs'     # ← App Password डालें
 app.config['MAIL_DEFAULT_SENDER'] = 'Tital <noreply@tital.com>'
 
 db = SQLAlchemy(app)
@@ -27,8 +26,9 @@ socketio = SocketIO(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 
-# Database Models
+# Database Models with explicit table names
 class User(UserMixin, db.Model):
+    __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(50), unique=True)
     email = db.Column(db.String(100), unique=True)
@@ -38,26 +38,30 @@ class User(UserMixin, db.Model):
     last_seen = db.Column(db.DateTime)
 
 class OTP(db.Model):
+    __tablename__ = 'otps'
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(100))
     otp = db.Column(db.String(6))
     expiration = db.Column(db.DateTime)
 
 class Message(db.Model):
+    __tablename__ = 'messages'
     id = db.Column(db.Integer, primary_key=True)
     sender_id = db.Column(db.Integer)
     receiver_id = db.Column(db.Integer)
     content = db.Column(db.Text)
     timestamp = db.Column(db.DateTime)
 
+# Initialize database within app context
+with app.app_context():
+    db.create_all()
+
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
 
 def send_otp_email(email):
-    # Delete old OTPs
     OTP.query.filter_by(email=email).delete()
-    
     otp = str(random.randint(100000, 999999))
     expiration = datetime.now() + timedelta(minutes=10)
     
@@ -84,10 +88,19 @@ def register():
         email = request.form['email']
         password = generate_password_hash(request.form['password'])
         
-        if User.query.filter((User.email == email) | (User.username == username)).first():
+        existing_user = User.query.filter(
+            (User.email == email) | 
+            (User.username == username)
+        ).first()
+        
+        if existing_user:
             return 'Username/Email already exists!'
             
-        new_user = User(username=username, email=email, password=password)
+        new_user = User(
+            username=username,
+            email=email,
+            password=password
+        )
         db.session.add(new_user)
         db.session.commit()
         
