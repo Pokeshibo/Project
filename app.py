@@ -170,7 +170,16 @@ def logout():
     db.session.commit()
     logout_user()
     return redirect(url_for('login'))
-
+# Add new route to mark messages as read
+@app.route('/messages/read/<receiver_id>', methods=['POST'])
+@login_required
+def mark_as_read(receiver_id):
+        Message.query.filter_by(
+           sender_id=receiver_id,
+           receiver_id=current_user.id
+       ).update({'read': True})
+       db.session.commit()
+       return 'OK'
 @app.route('/chat')
 @login_required
 def chat():
