@@ -192,25 +192,31 @@ def handle_disconnect():
         current_user.last_seen = datetime.now()
         db.session.commit()
         emit('user_offline', {'user_id': current_user.id}, broadcast=True)
-
 @socketio.on('send_message')
 def handle_send_message(data):
-    message = Message(
+    # Validate receiver exists
+    receiver = User.query.get(data['receiver_id'])
+    if not receiver:
+        return
+    
+    # Save message to database
+    new_message = Message(
         sender_id=current_user.id,
         receiver_id=data['receiver_id'],
         content=data['content'],
         timestamp=datetime.now()
     )
-    db.session.add(message)
+    db.session.add(new_message)
     db.session.commit()
     
+    # Emit to receiver's personal room
     emit('receive_message', {
         'sender_id': current_user.id,
         'content': data['content'],
         'timestamp': datetime.now().strftime('%H:%M'),
-        'sender_name': current_user.username
-    }, room=data['receiver_id'])
-
+        'sender_name': current_user.username,
+        'message_id': new_message.id
+    }, room=str(data['receiver_id']))  # Convert to string for room name
 @socketio.on('join')
 def handle_join(data):
     join_room(data['user_id'])
