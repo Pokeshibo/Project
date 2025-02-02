@@ -1,0 +1,19 @@
+# Core Packages
+Flask~=2.0.3
+Flask-SQLAlchemy~=3.0.2
+Flask-Login~=0.6.2
+Flask-Mail~=0.9.1
+Flask-SocketIO~=5.3.4
+Werkzeug~=2.0.3
+
+# Database & Security
+email-validator~=1.3.1
+python-dotenv~=1.0.0
+
+# Real-time Communication
+python-socketio~=5.8.0
+eventlet~=0.33.3
+
+# Additional Utilities
+itsdangerous~=2.1.2
+Jinja2~=3.1.2
