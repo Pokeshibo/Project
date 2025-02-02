@@ -71,6 +71,14 @@ def send_otp_email(email):
 def index():
     return redirect(url_for('login'))
 
+@app.route('/resend-otp')
+def resend_otp():
+    email = session.get('email')
+    if email:
+        send_otp_email(email)
+        return 'OTP resent!'
+    return 'Session expired'
+    
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
