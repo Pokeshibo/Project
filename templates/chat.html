@@ -1,77 +1,138 @@
-<!-- templates/chat.html -->
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Tital - Chat</title>
-    <link href="https://unpkg.com/tailwindcss@^2/dist/tailwind.min.css" rel="stylesheet>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <title>Tital Chat</title>
+    <link href="https://unpkg.com/tailwindcss@^2/dist/tailwind.min.css" rel="stylesheet">
 </head>
 <body class="bg-gray-100 h-screen">
     <div class="flex h-full">
-        <!-- Online Users Sidebar -->
-        <div class="w-1/4 bg-white shadow-lg p-4">
-            <h2 class="text-2xl font-bold text-purple-600 mb-4">Online Users</h2>
-            <div id="online-users" class="space-y-2">
-                {% for user in online_users %}
-                <div class="flex items-center p-2 hover:bg-gray-100 rounded-lg">
-                    <div class="w-3 h-3 bg-green-500 rounded-full mr-2"></div>
-                    <span>{{ user.username }}</span>
+        <!-- Sidebar -->
+        <div class="w-1/4 bg-white border-r">
+            <div class="p-4 bg-blue-600 text-white">
+                <h1 class="text-xl font-bold">Tital Chat</h1>
+                <p class="text-sm">Logged in as: {{ current_user.username }}</p>
+            </div>
+            
+            <div class="p-4">
+                <h2 class="text-lg font-semibold mb-4">Online Users</h2>
+                <div id="online-users" class="space-y-2">
+                    {% for user in online_users %}
+                    <div class="flex items-center p-2 hover:bg-gray-100 cursor-pointer user-item" 
+                         data-user-id="{{ user.id }}">
+                        <div class="w-2 h-2 bg-green-500 rounded-full mr-2"></div>
+                        {{ user.username }}
+                    </div>
+                    {% endfor %}
                 </div>
-                {% endfor %}
             </div>
         </div>
-        
-        <!-- Chat Main Area -->
+
+        <!-- Chat Area -->
         <div class="flex-1 flex flex-col">
-            <!-- Chat Header -->
-            <div class="bg-white shadow-lg p-4">
-                <h1 class="text-2xl font-bold text-purple-600">Tital Chat</h1>
-            </div>
-            
-            <!-- Chat Messages -->
+            <!-- Messages Container -->
             <div id="messages" class="flex-1 overflow-y-auto p-4 space-y-4">
-                <!-- Messages will be loaded here -->
+                <!-- Messages will load here -->
             </div>
-            
+
             <!-- Message Input -->
-            <div class="bg-white p-4 shadow-lg">
-                <input type="text" id="message-input" 
-                    class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-purple-500"
-                    placeholder="Type your message...">
-                <button onclick="sendMessage()" 
-                    class="mt-2 bg-purple-600 text-white px-6 py-2 rounded-lg hover:bg-purple-700 transition duration-300">
-                    Send
-                </button>
+            <div class="p-4 border-t bg-white">
+                <div class="flex gap-2">
+                    <input type="text" id="message-input" 
+                           class="flex-1 p-2 border rounded-lg" 
+                           placeholder="Type your message...">
+                    <button onclick="sendMessage()" 
+                            class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700">
+                        Send
+                    </button>
+                </div>
             </div>
         </div>
     </div>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <script>
         const socket = io();
-        
+        let currentReceiver = null;
+
+        // Connect to user's personal room
         socket.on('connect', () => {
-            console.log('Connected to WebSocket');
+            socket.emit('join', { user_id: '{{ current_user.id }}' });
         });
 
-        socket.on('new_message', (data) => {
-            const messageElement = document.createElement('div');
-            messageElement.innerHTML = `
-                <div class="bg-purple-100 p-3 rounded-lg max-w-md">
+        // Handle online/offline users
+        socket.on('user_online', (data) => {
+            const userItem = document.querySelector(`.user-item[data-user-id="${data.user_id}"]`);
+            if(userItem) {
+                userItem.querySelector('.bg-gray-300').classList.replace('bg-gray-300', 'bg-green-500');
+            }
+        });
+
+        socket.on('user_offline', (data) => {
+            const userItem = document.querySelector(`.user-item[data-user-id="${data.user_id}"]`);
+            if(userItem) {
+                userItem.querySelector('.bg-green-500').classList.replace('bg-green-500', 'bg-gray-300');
+            }
+        });
+
+        // Handle incoming messages
+        socket.on('receive_message', (data) => {
+            const messagesDiv = document.getElementById('messages');
+            const messageHtml = `
+                <div class="bg-blue-100 p-3 rounded-lg max-w-md">
+                    <p class="font-medium">${data.sender_name}</p>
                     <p>${data.content}</p>
                     <span class="text-xs text-gray-500">${data.timestamp}</span>
                 </div>
             `;
-            document.getElementById('messages').appendChild(messageElement);
+            messagesDiv.innerHTML += messageHtml;
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
         });
-        
+
+        // Select user to chat
+        document.querySelectorAll('.user-item').forEach(item => {
+            item.addEventListener('click', () => {
+                currentReceiver = item.dataset.userId;
+                document.querySelectorAll('.user-item').forEach(u => u.classList.remove('bg-blue-50'));
+                item.classList.add('bg-blue-50');
+                loadChatHistory(currentReceiver);
+            });
+        });
+
+        function loadChatHistory(receiverId) {
+            fetch(`/chat/history/${receiverId}`)
+                .then(response => response.json())
+                .then(messages => {
+                    const messagesDiv = document.getElementById('messages');
+                    messagesDiv.innerHTML = messages.map(msg => `
+                        <div class="${msg.sender_id == {{ current_user.id }} ? 'bg-green-100' : 'bg-blue-100'} p-3 rounded-lg max-w-md ml-auto">
+                            <p>${msg.content}</p>
+                            <span class="text-xs text-gray-500">${new Date(msg.timestamp).toLocaleTimeString()}</span>
+                        </div>
+                    `).join('');
+                    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+                });
+        }
+
         function sendMessage() {
             const input = document.getElementById('message-input');
-            const message = input.value;
-            if(message.trim()) {
-                socket.emit('message', {
-                    receiver_id: 1, // Replace with actual receiver ID
+            const message = input.value.trim();
+            
+            if(message && currentReceiver) {
+                socket.emit('send_message', {
+                    receiver_id: currentReceiver,
                     content: message
                 });
+                
+                // Add message to local chat
+                const messagesDiv = document.getElementById('messages');
+                messagesDiv.innerHTML += `
+                    <div class="bg-green-100 p-3 rounded-lg max-w-md ml-auto">
+                        <p>${message}</p>
+                        <span class="text-xs text-gray-500">${new Date().toLocaleTimeString()}</span>
+                    </div>
+                `;
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+                
                 input.value = '';
             }
         }
