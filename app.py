@@ -170,16 +170,7 @@ def logout():
     db.session.commit()
     logout_user()
     return redirect(url_for('login'))
-# Add new route to mark messages as read
-@app.route('/messages/read/<receiver_id>', methods=['POST'])
-@login_required
-def mark_as_read(receiver_id):
-        Message.query.filter_by(
-           sender_id=receiver_id,
-           receiver_id=current_user.id
-       ).update({'read': True})
-       db.session.commit()
-       return 'OK'
+    
 @app.route('/chat')
 @login_required
 def chat():
@@ -227,12 +218,6 @@ def handle_send_message(data):
         'message_id': new_message.id
     }, room=str(data['receiver_id']))  # Convert to string for room name
 # Socket.IO handler
-@socketio.on('typing')
-def handle_typing(data):
-    emit('typing', {
-         'sender_id': current_user.id,
-         'sender_name': current_user.username
-       }, room=str(data['receiver_id']))
 @socketio.on('join')
 def handle_join(data):
     join_room(data['user_id'])
