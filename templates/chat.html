@@ -3,6 +3,24 @@
 <head>
     <title>Tital Chat</title>
     <link href="https://unpkg.com/tailwindcss@^2/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .message-enter { animation: messageEnter 0.3s ease; }
+        @keyframes messageEnter {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        /* Custom scrollbar */
+        #messages::-webkit-scrollbar {
+            width: 6px;
+        }
+        #messages::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        #messages::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 3px;
+        }
+    </style>
 </head>
 <body class="bg-gray-100 h-screen">
     <div class="flex h-full">
@@ -18,7 +36,8 @@
                 <div id="online-users" class="space-y-2">
                     {% for user in online_users %}
                     <div class="flex items-center p-2 hover:bg-gray-100 cursor-pointer user-item" 
-                         data-user-id="{{ user.id }}">
+                         data-user-id="{{ user.id }}" 
+                         data-user-name="{{ user.username }}">
                         <div class="w-2 h-2 bg-green-500 rounded-full mr-2"></div>
                         {{ user.username }}
                     </div>
@@ -38,10 +57,10 @@
             <div class="p-4 border-t bg-white">
                 <div class="flex gap-2">
                     <input type="text" id="message-input" 
-                           class="flex-1 p-2 border rounded-lg" 
+                           class="flex-1 p-2 border rounded-lg focus:outline-none focus:border-blue-500" 
                            placeholder="Type your message...">
                     <button onclick="sendMessage()" 
-                            class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700">
+                            class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors">
                         Send
                     </button>
                 </div>
@@ -49,95 +68,129 @@
         </div>
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
-    <!-- chat.html में नया JavaScript कोड -->
-<!-- chat.html में JavaScript अपडेट करें -->
-<script>
-    const socket = io({
-        transports: ['websocket'],
-        reconnectionAttempts: 5
-    });
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script>
+        const socket = io();
+        let currentReceiver = null;
+        let currentReceiverName = null;
+        let currentMessages = [];
 
-    // Connection status handling
-    socket.on('connect_error', (error) => {
-        console.error('Connection Error:', error);
-        alert('Connection failed: ' + error.message);
-    });
+        socket.on('connect', () => {
+            console.log('Connected to server');
+            socket.emit('join', { user_id: '{{ current_user.id }}' });
+        });
 
-    // Improved message sending
-    async function sendMessage() {
-        const input = document.getElementById('message-input');
-        const content = input.value.trim();
-        if (!content || !currentReceiver) return;
+        document.querySelectorAll('.user-item').forEach(item => {
+            item.addEventListener('click', async () => {
+                currentReceiver = item.dataset.userId;
+                currentReceiverName = item.dataset.userName;
+                document.querySelectorAll('.user-item').forEach(u => u.classList.remove('bg-blue-50'));
+                item.classList.add('bg-blue-50');
+                
+                try {
+                    const response = await fetch(`/api/messages/${currentReceiver}`);
+                    const messages = await response.json();
+                    currentMessages = messages.map(msg => ({
+                        ...msg,
+                        is_mine: msg.sender_id === parseInt('{{ current_user.id }}')
+                    }));
+                    renderMessages();
+                } catch (error) {
+                    console.error('Error loading messages:', error);
+                }
+            });
+        });
 
-        const tempId = Date.now();
-        addTempMessage(tempId, content);
-        input.value = '';
+        socket.on('new_message', (data) => {
+            if(data.sender_id == currentReceiver) {
+                currentMessages.push({
+                    ...data,
+                    is_mine: false,
+                    sender_name: currentReceiverName,
+                    timestamp: new Date().toLocaleTimeString()
+                });
+                renderMessages();
+                socket.emit('mark_delivered', { message_id: data.id });
+            }
+        });
 
-        try {
-            const response = await socket.emitWithAck('send_message', {
+        function sendMessage() {
+            const input = document.getElementById('message-input');
+            const content = input.value.trim();
+            if(!content || !currentReceiver) return;
+
+            const tempId = Date.now();
+            currentMessages.push({
+                temp_id: tempId,
+                content: content,
+                is_mine: true,
+                sender_name: '{{ current_user.username }}',
+                timestamp: new Date().toLocaleTimeString(),
+                status: 'sending'
+            });
+            renderMessages();
+            input.value = '';
+
+            socket.emit('send_message', {
                 receiver_id: currentReceiver,
                 content: content,
                 temp_id: tempId
+            }, (response) => {
+                if(response?.status === 'success') {
+                    const msgIndex = currentMessages.findIndex(m => m.temp_id === tempId);
+                    if(msgIndex > -1) {
+                        currentMessages[msgIndex].id = response.message_id;
+                        currentMessages[msgIndex].status = 'sent';
+                        renderMessages();
+                    }
+                } else {
+                    const msgIndex = currentMessages.findIndex(m => m.temp_id === tempId);
+                    if(msgIndex > -1) {
+                        currentMessages[msgIndex].status = 'failed';
+                        currentMessages[msgIndex].error = response?.error || 'Failed to send';
+                        renderMessages();
+                    }
+                    alert('Error: ' + (response?.error || 'Unknown error'));
+                }
             });
-            
-            if(response.status === 'success') {
-                updateMessageStatus(tempId, response.message_id);
-            }
-        } catch (error) {
-            showErrorMessage(tempId, error);
         }
-    }
 
-    function addTempMessage(tempId, content) {
-        const message = {
-            temp_id: tempId,
-            content: content,
-            is_mine: true,
-            timestamp: new Date().toLocaleTimeString(),
-            status: 'sending'
-        };
-        currentMessages.push(message);
-        renderMessages();
-    }
-
-    function updateMessageStatus(tempId, messageId) {
-        const index = currentMessages.findIndex(m => m.temp_id === tempId);
-        if(index > -1) {
-            currentMessages[index].id = messageId;
-            currentMessages[index].status = 'sent';
-            renderMessages();
-        }
-    }
-
-    function showErrorMessage(tempId, error) {
-        const index = currentMessages.findIndex(m => m.temp_id === tempId);
-        if(index > -1) {
-            currentMessages[index].status = 'failed';
-            currentMessages[index].error = error;
-            renderMessages();
-        }
-        alert('Message failed: ' + error);
-    }
-
-    // Enhanced message rendering
-    function renderMessages() {
-        const container = document.getElementById('messages');
-        container.innerHTML = currentMessages.map(msg => `
-            <div class="message ${msg.is_mine ? 'mine' : 'theirs'} ${msg.status}">
-                <div class="content">${msg.content}</div>
-                <div class="status">
-                    ${msg.status === 'sending' ? '🕒' : ''}
-                    ${msg.status === 'sent' ? '✓' : ''}
-                    ${msg.status === 'delivered' ? '✓✓' : ''}
-                    ${msg.status === 'failed' ? '❌' : ''}
+        function renderMessages() {
+            const container = document.getElementById('messages');
+            container.innerHTML = currentMessages.map(msg => `
+                <div class="message-enter flex ${msg.is_mine ? 'justify-end' : 'justify-start'}">
+                    <div class="${msg.is_mine ? 'bg-blue-500 text-white ml-12' : 'bg-gray-200 mr-12'} p-3 rounded-lg max-w-md mb-2 relative">
+                        <!-- Sender Name for received messages -->
+                        ${!msg.is_mine ? `
+                            <div class="text-xs font-medium text-gray-600 mb-1">
+                                ${msg.sender_name || 'Unknown'}
+                            </div>
+                        ` : ''}
+                        
+                        <!-- Message Content -->
+                        <p>${msg.content}</p>
+                        
+                        <!-- Message Status and Time -->
+                        <div class="flex items-center justify-end mt-1 space-x-2">
+                            <span class="text-xs ${msg.is_mine ? 'text-blue-100' : 'text-gray-500'}">
+                                ${msg.timestamp}
+                            </span>
+                            ${msg.is_mine ? `
+                                <span class="text-xs ${msg.is_delivered ? 'text-white' : 'text-blue-200'}">
+                                    ${msg.is_delivered ? '✓✓' : '✓'}
+                                </span>
+                            ` : ''}
+                        </div>
+                        
+                        <!-- Error Message -->
+                        ${msg.status === 'failed' ? `
+                            <div class="text-red-500 text-xs mt-1">${msg.error || 'Failed to send'}</div>
+                        ` : ''}
+                    </div>
                 </div>
-                <div class="time">${msg.timestamp}</div>
-                ${msg.error ? `<div class="error">${msg.error}</div>` : ''}
-            </div>
-        `).join('');
-        container.scrollTop = container.scrollHeight;
-    }
-</script>
+            `).join('');
+            container.scrollTop = container.scrollHeight;
+        }
+    </script>
 </body>
 </html>
